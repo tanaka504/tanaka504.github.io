@@ -4,9 +4,20 @@ layout: default
 
 <div class="home">
   <h1 class="page-heading">Profiles</h1>
+  <div class="self-introduce">
+    大阪大学大学院情報科学研究科 <a href="http://www-bigdata.ist.osaka-u.ac.jp/ja/home/">鬼塚研究室</a>の修士2年です．
+    <a href="https://nlp-arase.github.io/">荒瀬由紀准教授</a>にご指導いただいております．
+    雑談対話システムの研究をしており，より人間らしいユーモア溢れるチャットボットの構築を目指しております．
+    趣味：ゲーム/ギター/ラーメン巡り/料理/たまに絵描きます
+    Nintendo Switch: SW-4204-8682-2036
+    Fate Grand Order: 418,823,684
+  </div>
 
 
-  
-
-
+  <h1 class="page-heading">Career</h1>
+  {% for line in site.data.career %}
+    <li>
+        <div class="title">{{ line }}</div>
+    </li>
+  {% endfor %}
 </div>
