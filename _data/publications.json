@@ -13,9 +13,14 @@
   ],
   'Domestic': [
     {
+      'authors': '田中 昂志，芦原 和樹，Chenhui Chu，中島 悠太，武村 紀子，長原 一，藤川 隆男',
+      'title': '公開集会記事からの情報抽出',
+      'info': '第34回人工知能学会全国大会(JSAI2020)，Jun. 2020 (to appear)',
+    },
+    {
       'authors': '田中 昂志，Chenhui Chu，梶原 智之, 中島 悠太，武村 紀子，長原 一，藤川 隆男',
       'title': 'OCR誤り訂正を用いた歴史新聞データからのコーパス構築',
-      'info': '言語処理学会第26回年次大会，Mar. 2020 (to appear)',
+      'info': '言語処理学会第26回年次大会，Mar. 2020',
     },
     {
       'authors': 'Chenhui Chu，<u>Koji Tanaka</u>，Haolin Ren，Benjamin Renoust，Yuta Nakashima，Noriko Takemura，Hajime Nagahara，Takao Fujikawa',
