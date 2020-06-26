@@ -8,8 +8,8 @@ permalink: /gallery/
 
 {% for photo in site.data.gallery %}
 <div class="gallery">
-  <a target="_blank" href="{{ site.url }}/images/{{ photo.image }}">
-    <img src="{{ site.url }}/images/{{ photo.image }}" alt="Cinque Terre" width="600" height="400">
+  <a target="_blank" href="{{ site.url }}/images/{{ photo.image }}" class="gallery_card">
+    <img src="{{ site.url }}/images/{{ photo.image }}" alt="Cinque Terre" />
   </a>
   <div class="desc">{{ photo.description }}</div>
 </div>
