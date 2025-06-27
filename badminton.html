@@ -728,298 +728,290 @@ h1::after {
   </script>
   <script>
   // 組み合わせ生成ユーティリティ
-  function combinations(arr, k) {
-    const result = [];
-    const combo = (start, path) => {
-      if (path.length === k) {
-        result.push([...path]);
-        return;
-      }
-      for (let i = start; i < arr.length; i++) {
-        path.push(arr[i]);
-        combo(i + 1, path);
-        path.pop();
-      }
-    };
-    combo(0, []);
-    return result;
-  }
+  // function combinations(arr, k) {
+  //   const result = [];
+  //   const combo = (start, path) => {
+  //     if (path.length === k) {
+  //       result.push([...path]);
+  //       return;
+  //     }
+  //     for (let i = start; i < arr.length; i++) {
+  //       path.push(arr[i]);
+  //       combo(i + 1, path);
+  //       path.pop();
+  //     }
+  //   };
+  //   combo(0, []);
+  //   return result;
+  // }
 
-  // Set/Array → 一意な文字列化（frozenset用途）
-  function setKey(a) {
-    return Array.from(a).sort((x, y) => x - y).join(',');
-  }
-
-  // 固定ペア用: 配列→hash値 (衝突しにくい値)
-  function pairHash(pair) {
-    return pair[0] * 1000 + pair[1];
+  // 配列を一意な文字列に変換
+  function arrayKey(arr) {
+    return [...arr].sort((x, y) => x - y).join(',');
   }
 
   class RoundGenerator {
     constructor(numPlayers, numCourts = 2, maxRounds = 100, numTeams = 0) {
-      // 固定ペア生成
+      // 固定ペア設定
       this.fixedPairs = [];
       for (let i = 1; i <= numTeams * 2; i += 2) {
         this.fixedPairs.push([i, i + 1]);
       }
-      this.fixedLabel = {};
-      this.fixedPairs.forEach((pair, idx) => {
-        this.fixedLabel[setKey(pair)] = String.fromCharCode(65 + idx);
-      });
-
-      this.fixedPairSets = this.fixedPairs.map(pair => new Set(pair));
-
+      
       this.numPlayers = numPlayers + numTeams * 2;
       this.numCourts = numCourts;
       this.maxRounds = maxRounds;
-
-      // 各プレイヤーの累積試合数
-      this.player2matchnum = {};
-      for (let p = 1; p <= this.numPlayers; p++) this.player2matchnum[p] = 0;
-
-      this.usedGroups = new Set(); // setKey(group)
-      this.usedTeams = new Set();  // setKey(team)
-
-      // 対戦履歴（Map: setKey→回数）
-      this.playerHistory = new Map();
-
-      this.allPairings = this._enumeratePairings();
+      
+      // プレイヤーごとの試合数
+      this.playerMatches = {};
+      for (let p = 1; p <= this.numPlayers; p++) {
+        this.playerMatches[p] = 0;
+      }
+      
+      // ペア使用履歴（ペア → 使用回数）
+      this.pairHistory = new Map();
+      
+      // 対戦履歴（プレイヤー同士 → 対戦回数）
+      this.opponentHistory = new Map();
+      
+      // 全ての可能な組み合わせを事前生成
+      this.allCombinations = this._generateAllCombinations();
+      
       this.rounds = [];
     }
 
+    // 固定ペアかどうか判定
     _isFixedPair(p1, p2) {
-      // 固定ペアに一致するか
-      return this.fixedPairSets.some(
-        s => s.has(p1) && s.has(p2) && s.size === 2
+      return this.fixedPairs.some(pair => 
+        (pair[0] === p1 && pair[1] === p2) || (pair[0] === p2 && pair[1] === p1)
       );
     }
 
-    _enumeratePairings() {
-      const players = Array.from({ length: this.numPlayers }, (_, i) => i + 1);
-      const seen = new Set();
-      const pairings = [];
-      const fixedSets = this.fixedPairs.map(pair => new Set(pair));
-      for (const four of combinations(players, 4)) {
-        const fs4 = new Set(four);
-        // 「固定ペアの一方だけ」混ざってる場合はスキップ
-        let bad = false;
-        for (const fset of fixedSets) {
-          const intersection = [...fs4].filter(x => fset.has(x));
-          if (intersection.length === 1) {
-            bad = true;
-            break;
-          }
-        }
-        if (bad) continue;
-
-        for (const t1 of combinations(four, 2)) {
-          let ok = true;
-          for (const fset of fixedSets) {
-            if ([...fset].every(x => fs4.has(x))) {
-              if ([...fset].filter(x => t1.includes(x)).length === 1) {
-                ok = false;
-                break;
-              }
-            }
-          }
-          if (!ok) continue;
-          const team1 = [...t1].sort((a, b) => a - b);
-          const team2 = [...four].filter(x => !team1.includes(x)).sort((a, b) => a - b);
-          let t1n = team1, t2n = team2;
-          // 辞書順normalize
-          if (t1n[0] > t2n[0]) [t1n, t2n] = [t2n, t1n];
-          const key = setKey([...t1n, ...t2n]);
-          if (!seen.has(key)) {
-            seen.add(key);
-            pairings.push([new Set(four), [t1n, t2n]]);
+    // 全ての可能な組み合わせを生成
+    _generateAllCombinations() {
+      const players = Array.from({length: this.numPlayers}, (_, i) => i + 1);
+      const combinations = [];
+      
+      // 4人の組み合わせを全て生成
+      for (const fourPlayers of this._getCombinations(players, 4)) {
+        // 固定ペアの制約チェック
+        if (!this._isValidFourPlayers(fourPlayers)) continue;
+        
+        // 4人を2つのペアに分ける全パターン
+        const pairings = this._getPairings(fourPlayers);
+        for (const [team1, team2] of pairings) {
+          // 固定ペア制約チェック
+          if (this._isValidPairing(team1, team2)) {
+            combinations.push({
+              players: new Set(fourPlayers),
+              team1: team1.sort((a, b) => a - b),
+              team2: team2.sort((a, b) => a - b)
+            });
           }
         }
       }
-      return pairings;
+      
+      return combinations;
     }
 
-    _calculate_group_priority(group) {
-      // group: Set
-      const vals = Array.from(group).map(p => this.player2matchnum[p]);
-      const min_matches = Math.min(...vals);
-      const match_diff = Math.max(...vals) - min_matches;
-      return [min_matches, match_diff];
+    _getCombinations(arr, k) {
+      if (k === 0) return [[]];
+      if (arr.length === 0) return [];
+      
+      const [first, ...rest] = arr;
+      const withFirst = this._getCombinations(rest, k - 1).map(combo => [first, ...combo]);
+      const withoutFirst = this._getCombinations(rest, k);
+      
+      return [...withFirst, ...withoutFirst];
     }
 
-    _calculate_novelty_score(group, team1, team2) {
-      let score = 0;
-      // チーム内の組み合わせ（一緒にプレー）
-      [team1, team2].forEach(t => {
-        for (let i = 0; i < t.length; i++) {
-          for (let j = i + 1; j < t.length; j++) {
-            if (this._isFixedPair(t[i], t[j])) continue;
-            const key = setKey([t[i], t[j]]);
-            score += (this.playerHistory.get(key) || 0) * 20;
-          }
+    // 4人の組み合わせが有効かチェック（固定ペアの片方だけが含まれていないか）
+    _isValidFourPlayers(fourPlayers) {
+      const playerSet = new Set(fourPlayers);
+      
+      for (const [p1, p2] of this.fixedPairs) {
+        const hasP1 = playerSet.has(p1);
+        const hasP2 = playerSet.has(p2);
+        
+        // 固定ペアの片方だけが含まれている場合は無効
+        if (hasP1 !== hasP2) {
+          return false;
         }
-      });
-      // チーム間の対戦履歴
+      }
+      
+      return true;
+    }
+
+    // 4人を2つのペアに分ける
+    _getPairings(fourPlayers) {
+      const [p1, p2, p3, p4] = fourPlayers;
+      return [
+        [[p1, p2], [p3, p4]],
+        [[p1, p3], [p2, p4]],
+        [[p1, p4], [p2, p3]]
+      ];
+    }
+
+    // ペアの組み合わせが有効かチェック
+    _isValidPairing(team1, team2) {
+      // 固定ペアは必ず一緒になる
+      for (const [p1, p2] of this.fixedPairs) {
+        const team1HasBoth = team1.includes(p1) && team1.includes(p2);
+        const team2HasBoth = team2.includes(p1) && team2.includes(p2);
+        const team1HasOne = team1.includes(p1) || team1.includes(p2);
+        const team2HasOne = team2.includes(p1) || team2.includes(p2);
+        
+        // 固定ペアが分かれている場合は無効
+        if (team1HasOne && team2HasOne && !team1HasBoth && !team2HasBoth) {
+          return false;
+        }
+      }
+      
+      return true;
+    }
+
+    // 組み合わせのスコアを計算（低いほど良い）
+    _calculateScore(combination, prevRoundPlayers) {
+      let score = 0;
+      const {players, team1, team2} = combination;
+      
+      // 1. プレイヤーの試合数の不均衡ペナルティ
+      const matchCounts = [...players].map(p => this.playerMatches[p]);
+      const minMatches = Math.min(...matchCounts);
+      const maxMatches = Math.max(...matchCounts);
+      score += maxMatches * 100; //試合数が多い人がいる組み合わせの優先度を下げる
+      score += minMatches * 10; // 試合数が少ない人を優先
+      
+      // 2. 直前ラウンドのプレイヤー重複ペナルティ
+      if (prevRoundPlayers) {
+        const overlap = [...players].filter(p => prevRoundPlayers.has(p)).length;
+        score += overlap * 50;
+      }
+      
+      // 3. ペア再利用ペナルティ
+      const team1Key = arrayKey(team1);
+      const team2Key = arrayKey(team2);
+      
+      // 固定ペア以外の再利用にペナルティ
+      if (!this._isFixedPair(team1[0], team1[1])) {
+        score += (this.pairHistory.get(team1Key) || 0) * 200;
+      }
+      if (!this._isFixedPair(team2[0], team2[1])) {
+        score += (this.pairHistory.get(team2Key) || 0) * 200;
+      }
+      
+      // 4. 対戦相手再利用ペナルティ
       for (const p1 of team1) {
         for (const p2 of team2) {
-          const key = setKey([p1, p2 + this.numPlayers]);
-          score += (this.playerHistory.get(key) || 0) * 20;
+          const opponentKey = arrayKey([p1, p2]);
+          score += (this.opponentHistory.get(opponentKey) || 0) * 30;
         }
       }
-      // 固定ペア同士の対戦履歴
-      const team1_fixed_pairs = [];
-      const team2_fixed_pairs = [];
-      for (const fp of this.fixedPairs) {
-        const fpSet = new Set(fp);
-        if ([...fpSet].every(x => team1.includes(x))) team1_fixed_pairs.push(fp);
-        if ([...fpSet].every(x => team2.includes(x))) team2_fixed_pairs.push(fp);
-      }
-      for (const fp1 of team1_fixed_pairs) {
-        for (const fp2 of team2_fixed_pairs) {
-          const key = setKey([pairHash(fp1), pairHash(fp2) + 1000]);
-          score += (this.playerHistory.get(key) || 0) * 8;
-        }
-      }
+      
       return score;
     }
 
-    _select_for_round(prev_players, avoid_prev, avoid_team) {
-      // prev_players: Set
-      let cands = this.allPairings.filter(
-        ([group]) => !this.usedGroups.has(setKey(group))
-      );
-      const picks = [];
-      let used_in_round = new Set();
-
-      for (let i = 0; i < this.numCourts; i++) {
-        if (!cands.length) break;
-        const valid_cands = [];
-        for (const [group, [t1, t2]] of cands) {
-          const groupArr = [...group];
-          // 同ラウンド内重複
-          if (groupArr.some(x => used_in_round.has(x))) continue;
-          // 直前ラウンド重複
-          if (avoid_prev && groupArr.some(x => prev_players.has(x))) continue;
-          // ペア再利用
-          if (avoid_team) {
-            const team1_set = setKey(t1), team2_set = setKey(t2);
-            if ((this.usedTeams.has(team1_set) && !this.fixedPairSets.some(fp => [...fp].every(x => t1.includes(x)))) ||
-                (this.usedTeams.has(team2_set) && !this.fixedPairSets.some(fp => [...fp].every(x => t2.includes(x))))
-            ) continue;
+    // ラウンドの組み合わせを選択
+    _selectRoundCombinations(prevRoundPlayers) {
+      const selectedCombinations = [];
+      const usedPlayers = new Set();
+      
+      // 各コートに対して最適な組み合わせを選択
+      for (let court = 0; court < this.numCourts; court++) {
+        let bestCombination = null;
+        let bestScore = Infinity;
+        
+        // 使用されていないプレイヤーのみを含む組み合わせを評価
+        for (const combination of this.allCombinations) {
+          // 既に使用されているプレイヤーが含まれている場合はスキップ
+          if ([...combination.players].some(p => usedPlayers.has(p))) {
+            continue;
           }
-          if (!this.fixedPairSets.some(fp => [...fp].every(x => t1.includes(x)))) {
-            if ((this.playerHistory.get(setKey(t1)) || 0) > 0) continue;
+          
+          const score = this._calculateScore(combination, prevRoundPlayers);
+          
+          if (score < bestScore) {
+            bestScore = score;
+            bestCombination = combination;
           }
-          if (!this.fixedPairSets.some(fp => [...fp].every(x => t2.includes(x)))) {
-            if ((this.playerHistory.get(setKey(t2)) || 0) > 0) continue;
-          }
-          // グループ優先度
-          const group_priority = this._calculate_group_priority(group);
-          // 新しさスコア
-          const novelty_score = this._calculate_novelty_score(group, t1, t2);
-          valid_cands.push([group, [t1, t2], group_priority, novelty_score]);
         }
-        // ソート
-        valid_cands.sort((a, b) => {
-          // チーム内ペア回数を最優先
-          const pairCountA = (
-            (this.playerHistory.get(setKey([a[1][0][0], a[1][0][1]])) || 0) +
-            (this.playerHistory.get(setKey([a[1][1][0], a[1][1][1]])) || 0)
-          );
-          const pairCountB = (
-            (this.playerHistory.get(setKey([b[1][0][0], b[1][0][1]])) || 0) +
-            (this.playerHistory.get(setKey([b[1][1][0], b[1][1][1]])) || 0)
-          );
-          if (pairCountA !== pairCountB) return pairCountA - pairCountB;
-          if (a[2][0] !== b[2][0]) return a[2][0] - b[2][0];
-          if (a[2][1] !== b[2][1]) return a[2][1] - b[2][1];
-          return a[3] - b[3];
+        
+        if (bestCombination) {
+          selectedCombinations.push(bestCombination);
+          // 使用されたプレイヤーを記録
+          bestCombination.players.forEach(p => usedPlayers.add(p));
+        } else {
+          // 組み合わせが見つからない場合は終了
+          break;
+        }
+      }
+      
+      return selectedCombinations;
+    }
+
+    // 履歴を更新
+    _updateHistory(combinations) {
+      for (const {team1, team2} of combinations) {
+        // プレイヤーの試合数を増加
+        [...team1, ...team2].forEach(p => {
+          this.playerMatches[p]++;
         });
-        if (!valid_cands.length) break;
-        const [group, teams] = valid_cands[0];
-        picks.push([group, teams]);
-        used_in_round = new Set([...used_in_round, ...group]);
-        cands = cands.filter(([g]) => ![...g].some(x => group.has(x)));
-      }
-      return [picks, used_in_round];
-    }
-
-    _update_player_history(team1, team2) {
-      // チーム内
-      [team1, team2].forEach(t => {
-        for (let i = 0; i < t.length; i++) {
-          for (let j = i + 1; j < t.length; j++) {
-            if (this._isFixedPair(t[i], t[j])) continue;
-            const key = setKey([t[i], t[j]]);
-            this.playerHistory.set(key, (this.playerHistory.get(key) || 0) + 1);
+        
+        // ペア履歴を更新（固定ペア以外）
+        if (!this._isFixedPair(team1[0], team1[1])) {
+          const team1Key = arrayKey(team1);
+          this.pairHistory.set(team1Key, (this.pairHistory.get(team1Key) || 0) + 1);
+        }
+        if (!this._isFixedPair(team2[0], team2[1])) {
+          const team2Key = arrayKey(team2);
+          this.pairHistory.set(team2Key, (this.pairHistory.get(team2Key) || 0) + 1);
+        }
+        
+        // 対戦履歴を更新
+        for (const p1 of team1) {
+          for (const p2 of team2) {
+            const opponentKey = arrayKey([p1, p2]);
+            this.opponentHistory.set(opponentKey, (this.opponentHistory.get(opponentKey) || 0) + 1);
           }
         }
-      });
-      // チーム間
-      for (const p1 of team1) {
-        for (const p2 of team2) {
-          const key = setKey([p1, p2 + this.numPlayers]);
-          this.playerHistory.set(key, (this.playerHistory.get(key) || 0) + 1);
-        }
-      }
-      // 固定ペア同士
-      const team1_fixed_pairs = [];
-      const team2_fixed_pairs = [];
-      for (const fp of this.fixedPairs) {
-        const fpSet = new Set(fp);
-        if ([...fpSet].every(x => team1.includes(x))) team1_fixed_pairs.push(fp);
-        if ([...fpSet].every(x => team2.includes(x))) team2_fixed_pairs.push(fp);
-      }
-      for (const fp1 of team1_fixed_pairs) {
-        for (const fp2 of team2_fixed_pairs) {
-          const key = setKey([pairHash(fp1), pairHash(fp2) + 1000]);
-          this.playerHistory.set(key, (this.playerHistory.get(key) || 0) + 1);
-        }
       }
     }
 
+    // メイン生成関数
     generate() {
-      if (this.numPlayers < this.numCourts * 4)
+      if (this.numPlayers < this.numCourts * 4) {
         throw new Error("プレイヤー数が不足しています");
-      let prev_players = new Set();
-
-      for (let rnd = 0; rnd < this.maxRounds; rnd++) {
-        const modes = [
-          [true, true],
-          [true, false],
-          [false, true],
-          [false, false],
-        ];
-        let picks, used_in_round, found = false;
-        for (const [avoid_prev, avoid_team] of modes) {
-          [picks, used_in_round] = this._select_for_round(prev_players, avoid_prev, avoid_team);
-          if (picks.length === this.numCourts) {
-            found = true;
-            break;
-          }
-        }
-        if (!found) break;
-
-        const formatted = [];
-        for (const [group, [t1, t2]] of picks) {
-          this.usedGroups.add(setKey(group));
-          const team1_set = setKey(t1), team2_set = setKey(t2);
-          if (!this.fixedPairSets.some(fp => [...fp].every(x => t1.includes(x))))
-            this.usedTeams.add(team1_set);
-          if (!this.fixedPairSets.some(fp => [...fp].every(x => t2.includes(x))))
-            this.usedTeams.add(team2_set);
-          for (const p of group) this.player2matchnum[p] += 1;
-          this._update_player_history(t1, t2);
-          formatted.push([t1, t2]);
-        }
-        this.rounds.push(formatted);
-        prev_players = used_in_round;
       }
+      
+      let prevRoundPlayers = null;
+      
+      for (let round = 0; round < this.maxRounds; round++) {
+        const combinations = this._selectRoundCombinations(prevRoundPlayers);
+        
+        if (combinations.length === 0) {
+          break; // 組み合わせが見つからない場合は終了
+        }
+        
+        // 履歴を更新
+        this._updateHistory(combinations);
+        
+        // ラウンド結果を保存
+        const roundResult = combinations.map(({team1, team2}) => [team1, team2]);
+        this.rounds.push(roundResult);
+        
+        // 次のラウンドのために今回使用したプレイヤーを記録
+        prevRoundPlayers = new Set();
+        combinations.forEach(({players}) => {
+          players.forEach(p => prevRoundPlayers.add(p));
+        });
+      }
+      
       return this.rounds;
     }
 
     // 統計情報を取得
     getStats() {
-      const playerMatches = Object.values(this.player2matchnum);
+      const playerMatches = Object.values(this.playerMatches);
       const minMatches = Math.min(...playerMatches);
       const maxMatches = Math.max(...playerMatches);
       const avgMatches = playerMatches.reduce((a, b) => a + b, 0) / playerMatches.length;
@@ -1035,17 +1027,15 @@ h1::after {
     }
 
     _getMatchDistribution() {
-      // 試合数ごとの選手数を計算
       const distribution = {};
-      Object.values(this.player2matchnum).forEach(count => {
+      Object.values(this.playerMatches).forEach(count => {
         distribution[count] = (distribution[count] || 0) + 1;
       });
 
-      // Chart.js用のデータ形式に変換
       const labels = [];
       const data = [];
-
       const maxCount = Math.max(...Object.keys(distribution).map(Number));
+      
       for (let i = 0; i <= maxCount; i++) {
         labels.push(i.toString());
         data.push(distribution[i] || 0);
@@ -1054,6 +1044,7 @@ h1::after {
       return { labels, data };
     }
   }
+
 
   // ==== DOM 操作 ====
   const btnGen    = document.getElementById('btnGen');
@@ -1074,7 +1065,7 @@ h1::after {
     setTimeout(() => {
       output.innerHTML = '';
       
-      try {
+      // try {
         const rg = new RoundGenerator(s, c, mr, t);
         const rounds = rg.generate();
         const stats = rg.getStats();
@@ -1173,25 +1164,25 @@ h1::after {
           });
         });
         
-      } catch(e) {
-        const alert = document.createElement('div');
-        alert.className = 'alert alert-danger';
-        alert.innerHTML = `<i class="fas fa-exclamation-circle alert-icon"></i> エラー: ${e.message}`;
-        output.appendChild(alert);
+      // } catch(e) {
+      //   const alert = document.createElement('div');
+      //   alert.className = 'alert alert-danger';
+      //   alert.innerHTML = `<i class="fas fa-exclamation-circle alert-icon"></i> エラー: ${e.message}`;
+      //   output.appendChild(alert);
         
-        // エラー時は空の状態を表示
-        const emptyState = document.createElement('div');
-        emptyState.className = 'empty-state';
-        emptyState.innerHTML = `
-          <div class="empty-icon">
-            <i class="fas fa-exclamation-triangle"></i>
-          </div>
-          <div class="empty-text">
-            設定を見直して、もう一度試してください。
-          </div>
-        `;
-        output.appendChild(emptyState);
-      }
+      //   // エラー時は空の状態を表示
+      //   const emptyState = document.createElement('div');
+      //   emptyState.className = 'empty-state';
+      //   emptyState.innerHTML = `
+      //     <div class="empty-icon">
+      //       <i class="fas fa-exclamation-triangle"></i>
+      //     </div>
+      //     <div class="empty-text">
+      //       設定を見直して、もう一度試してください。
+      //     </div>
+      //   `;
+      //   output.appendChild(emptyState);
+      // }
       
       // ローディング非表示
       loadingOverlay.classList.remove('show');
