@@ -908,6 +908,20 @@ h1::after {
         }
       }
       
+      // 5. 過去に味方または相手として関わった組み合わせにペナルティを付与
+      const playerList = [...players];
+      for (let i = 0; i < playerList.length; i++) {
+        for (let j = i + 1; j < playerList.length; j++) {
+          const relationKey = arrayKey([playerList[i], playerList[j]]);
+          const pastTeammateCount = this.pairHistory.get(relationKey) || 0;
+          const pastOpponentCount = this.opponentHistory.get(relationKey) || 0;
+          
+          // 軽いペナルティを足して新しい顔合わせを優先
+          score += pastTeammateCount * 80;
+          score += pastOpponentCount * 40;
+        }
+      }
+      
       return score;
     }
 
@@ -1144,6 +1158,17 @@ h1::after {
         tableContainer.appendChild(tbl);
         resultsCard.appendChild(tableContainer);
         
+        // 行クリックでも完了チェックを切り替え
+        tbl.querySelectorAll('tbody tr').forEach(row => {
+          row.addEventListener('click', (ev) => {
+            if (ev.target.closest('input[type="checkbox"]')) return;
+            const checkbox = row.querySelector('.call-checkbox');
+            if (!checkbox) return;
+            checkbox.checked = !checkbox.checked;
+            checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+          });
+        });
+
         output.appendChild(resultsCard);
         
         // アニメーションでカードを表示
