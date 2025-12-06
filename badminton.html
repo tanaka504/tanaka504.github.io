@@ -8,6 +8,8 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <!-- Font Awesome -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <!-- Google Fonts -->
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <style>
@@ -306,6 +308,31 @@ h1::after {
   box-shadow: 0 2px 5px rgba(0,0,0,0.05);
   font-size: 0.7rem;
   flex-shrink: 0;
+}
+
+.player-badge {
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  transition: transform var(--transition-speed), box-shadow var(--transition-speed), opacity var(--transition-speed);
+}
+
+.player-badge.dragging-source {
+  opacity: 0.35;
+  transform: scale(0.98);
+}
+
+.player-badge.drop-target {
+  box-shadow: 0 0 0 3px rgba(78, 115, 223, 0.35);
+  transform: scale(1.05);
+}
+
+.drag-ghost {
+  position: fixed;
+  pointer-events: none;
+  z-index: 2000;
+  opacity: 0.9;
+  transform: scale(1.05);
 }
 
 .call-checkbox {
@@ -631,7 +658,10 @@ h1::after {
   
   <div class="app-container container">
     <div class="header-section">
-      <h1><i class="fas fa-table-tennis fa-sm"></i> Round Generator</h1>
+      <h1>
+        <i id="btnOpenMatchChart" class="fas fa-table-tennis fa-sm me-2" role="button" style="cursor: pointer;"></i>
+        Round Generator
+      </h1>
       <p class="text-muted">テニス・バドミントンなどのラウンディングを効率的に生成するツール</p>
     </div>
 
@@ -711,6 +741,27 @@ h1::after {
         <button type="button" id="btnGuide" class="btn btn-outline-primary">
           <i class="fas fa-info-circle btn-icon"></i>使い方ガイド
         </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Match Count Modal -->
+  <div class="modal fade" id="matchCountModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header bg-primary text-white">
+          <h5 class="modal-title"><i class="fas fa-chart-bar me-2"></i>チェック済み試合のプレイヤー別試合数</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="alert alert-info py-2 mb-3" id="chartEmptyMessage" style="display: none;">
+            <i class="fas fa-info-circle me-2"></i>表示するには試合のチェックをつけてください。
+          </div>
+          <canvas id="playerCountChart" height="120"></canvas>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
+        </div>
       </div>
     </div>
   </div>
@@ -1065,6 +1116,16 @@ h1::after {
   const btnReset  = document.getElementById('btnReset');
   const output    = document.getElementById('outputArea');
   const loadingOverlay = document.getElementById('loadingOverlay');
+  let playerChart = null;
+  let currentNumPlayers = 0;
+  const dragState = {
+    timer: null,
+    source: null,
+    ghost: null,
+    hoverTarget: null,
+    active: false,
+    justDropped: false
+  };
 
   btnGen.addEventListener('click', ()=>{
     const s  = parseInt(document.getElementById('inpPlayers').value,10);
@@ -1083,6 +1144,7 @@ h1::after {
         const rg = new RoundGenerator(s, c, mr, t);
         const rounds = rg.generate();
         const stats = rg.getStats();
+        currentNumPlayers = rg.numPlayers;
   
         // 固定ペアラベル A,B,C...
         const fixedLabel = {};
@@ -1131,11 +1193,12 @@ h1::after {
             ${rounds.map((matches, ri)=>{
               return matches.map((pair, ci)=>{
                 const [t1,t2] = pair;
+                const playerData = [...t1, ...t2].join(',');
                 const k1 = t1.join(','), k2 = t2.join(',');
-                const l1 = fixedLabel[k1] || `${t1.map(p => `<div class="d-inline-block mx-2"><span class="badge bg-light text-dark fs-3">${p}</span></div>`).join('')}`;
-                const l2 = fixedLabel[k2] || `${t2.map(p => `<div class="d-inline-block mx-2"><span class="badge bg-light text-dark fs-3">${p}</span></div>`).join('')}`;
+                const l1 = fixedLabel[k1] || `${t1.map((p, idx) => `<div class="d-inline-block mx-2 player-panel"><span class="badge bg-light text-dark fs-3 player-badge" data-player-id="${p}" data-slot="${idx}" data-round="${ri}" data-court="${ci}">${p}</span></div>`).join('')}`;
+                const l2 = fixedLabel[k2] || `${t2.map((p, idx) => `<div class="d-inline-block mx-2 player-panel"><span class="badge bg-light text-dark fs-3 player-badge" data-player-id="${p}" data-slot="${idx + 2}" data-round="${ri}" data-court="${ci}">${p}</span></div>`).join('')}`;
                 return `
-                <tr>
+                <tr data-players="${playerData}">
                   <td><input type="checkbox" class="call-checkbox"></td>
                   <!-- <td><span class="round-badge">${ri+1}</span></td> -->
                   <td><span class="court-badge fs-4"><span class="d-none d-md-inline"><i class="fas fa-table-tennis me-1"></i>コート</span> ${ci+1}</span></td>
@@ -1186,8 +1249,11 @@ h1::after {
             } else {
               row.classList.remove('completed');
             }
+            updateChartIfVisible();
           });
         });
+
+        attachPlayerBadgeInteractions(tbl);
         
       // } catch(e) {
       //   const alert = document.createElement('div');
@@ -1215,6 +1281,240 @@ h1::after {
     }, 800); // 処理遅延時間（アニメーション用）
   });
 
+  function attachPlayerBadgeInteractions(root = document) {
+    root.querySelectorAll('.player-badge').forEach(badge => {
+      badge.addEventListener('pointerdown', handleBadgePointerDown);
+      badge.addEventListener('pointerleave', cancelPendingLongPress);
+    });
+  }
+
+  function handleBadgePointerDown(ev) {
+    ev.stopPropagation();
+    cancelPendingLongPress();
+    const badge = ev.currentTarget;
+    dragState.timer = setTimeout(() => beginBadgeDrag(badge, ev), 320);
+  }
+
+  function beginBadgeDrag(badge, ev) {
+    cancelPendingLongPress();
+    dragState.active = true;
+    dragState.source = badge;
+    badge.classList.add('dragging-source');
+    createGhost(badge, ev);
+  }
+
+  function createGhost(badge, ev) {
+    const ghost = badge.cloneNode(true);
+    ghost.classList.add('drag-ghost');
+    ghost.removeAttribute('id');
+    document.body.appendChild(ghost);
+    dragState.ghost = ghost;
+    positionGhost(ev);
+  }
+
+  function positionGhost(ev) {
+    if (!dragState.ghost) return;
+    dragState.ghost.style.left = `${ev.clientX + 8}px`;
+    dragState.ghost.style.top = `${ev.clientY + 8}px`;
+  }
+
+  function findBadgeTarget(clientX, clientY, source) {
+    const el = document.elementFromPoint(clientX, clientY);
+    if (!el) return null;
+    const badge = el.closest('.player-badge');
+    if (!badge || badge === source) return null;
+    return badge;
+  }
+
+  function highlightTarget(target) {
+    if (dragState.hoverTarget && dragState.hoverTarget !== target) {
+      dragState.hoverTarget.classList.remove('drop-target');
+    }
+    dragState.hoverTarget = target;
+    if (dragState.hoverTarget) {
+      dragState.hoverTarget.classList.add('drop-target');
+    }
+  }
+
+  function swapBadgePlayers(source, target) {
+    const id1 = source.dataset.playerId;
+    const id2 = target.dataset.playerId;
+    source.dataset.playerId = id2;
+    target.dataset.playerId = id1;
+    source.textContent = id2;
+    target.textContent = id1;
+
+    const slot1 = parseInt(source.dataset.slot, 10);
+    const slot2 = parseInt(target.dataset.slot, 10);
+    const row1 = source.closest('tr');
+    const row2 = target.closest('tr');
+    updateRowPlayerSlot(row1, slot1, id2);
+    updateRowPlayerSlot(row2, slot2, id1);
+
+    const row1Checked = row1?.querySelector('.call-checkbox')?.checked;
+    const row2Checked = row2?.querySelector('.call-checkbox')?.checked;
+    if (row1Checked || row2Checked) {
+      updateChartIfVisible();
+    }
+  }
+
+  function updateRowPlayerSlot(row, slot, playerId) {
+    if (!row || Number.isNaN(slot)) return;
+    const parts = (row.dataset.players || '').split(',').map(v => v.trim()).filter(v => v !== '');
+    while (parts.length < 4) {
+      parts.push('');
+    }
+    parts[slot] = String(playerId);
+    row.dataset.players = parts.join(',');
+  }
+
+  function completeDrag(ev) {
+    const target = findBadgeTarget(ev.clientX, ev.clientY, dragState.source);
+    if (target) {
+      swapBadgePlayers(dragState.source, target);
+    }
+    endBadgeDrag();
+  }
+
+  function cancelPendingLongPress() {
+    if (dragState.timer) {
+      clearTimeout(dragState.timer);
+      dragState.timer = null;
+    }
+  }
+
+  function endBadgeDrag() {
+    const wasActive = dragState.active;
+    cancelPendingLongPress();
+    if (dragState.ghost) {
+      dragState.ghost.remove();
+    }
+    if (dragState.source) {
+      dragState.source.classList.remove('dragging-source');
+    }
+    if (dragState.hoverTarget) {
+      dragState.hoverTarget.classList.remove('drop-target');
+    }
+    dragState.active = false;
+    dragState.ghost = null;
+    dragState.source = null;
+    dragState.hoverTarget = null;
+    dragState.justDropped = wasActive;
+    if (wasActive) {
+      setTimeout(() => { dragState.justDropped = false; }, 150);
+    }
+  }
+
+  document.addEventListener('pointermove', (ev) => {
+    if (!dragState.active) return;
+    ev.preventDefault();
+    positionGhost(ev);
+    const target = findBadgeTarget(ev.clientX, ev.clientY, dragState.source);
+    highlightTarget(target);
+  });
+
+  document.addEventListener('pointerup', (ev) => {
+    if (dragState.timer && !dragState.active) {
+      cancelPendingLongPress();
+      return;
+    }
+    if (dragState.active) {
+      completeDrag(ev);
+    }
+  });
+
+  document.addEventListener('pointercancel', () => {
+    if (dragState.timer || dragState.active) {
+      endBadgeDrag();
+    }
+  });
+
+  document.addEventListener('click', (ev) => {
+    if (dragState.justDropped) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      dragState.justDropped = false;
+    }
+  }, true);
+
+  function renderMatchChart(showModal = true) {
+    const checkedRows = document.querySelectorAll('.call-checkbox:checked');
+    const counts = {};
+    checkedRows.forEach(cb => {
+      const row = cb.closest('tr');
+      const players = row?.dataset.players || '';
+      players.split(',').forEach(num => {
+        const id = parseInt(num, 10);
+        if (Number.isNaN(id)) return;
+        counts[id] = (counts[id] || 0) + 1;
+      });
+    });
+
+    const maxPlayerId = Math.max(currentNumPlayers, ...Object.keys(counts).map(Number), 0);
+    const labelLength = Math.max(maxPlayerId, 1);
+    const labels = Array.from({length: labelLength}, (_, i) => (i + 1).toString());
+    const data = labels.map((_, idx) => counts[idx + 1] || 0);
+
+    const emptyMsg = document.getElementById('chartEmptyMessage');
+    if (emptyMsg) {
+      emptyMsg.style.display = checkedRows.length ? 'none' : 'block';
+    }
+
+    const canvas = document.getElementById('playerCountChart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (playerChart) {
+      playerChart.destroy();
+    }
+
+    playerChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: '試合数',
+          data,
+          backgroundColor: 'rgba(78, 115, 223, 0.6)',
+          borderColor: 'rgba(78, 115, 223, 1)',
+          borderWidth: 1
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: {
+            beginAtZero: true,
+            title: { display: true, text: '試合数' }
+          },
+          x: {
+            title: { display: true, text: 'プレイヤー' }
+          }
+        },
+        plugins: {
+          legend: { display: false }
+        }
+      }
+    });
+
+    if (showModal) {
+      const modalEl = document.getElementById('matchCountModal');
+      if (modalEl) {
+        const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        modal.show();
+      }
+    }
+  }
+
+  function updateChartIfVisible() {
+    const modalEl = document.getElementById('matchCountModal');
+    if (modalEl && modalEl.classList.contains('show')) {
+      renderMatchChart(false);
+    }
+  }
+
+  document.getElementById('btnOpenMatchChart').addEventListener('click', () => renderMatchChart(true));
+
   btnReset.addEventListener('click', ()=>{
     document.querySelectorAll('.call-checkbox')
             .forEach(cb => {
@@ -1222,6 +1522,7 @@ h1::after {
               const row = cb.closest('tr');
               if (row) row.classList.remove('completed');
             });
+    updateChartIfVisible();
   });
   
   // 使い方ガイド
